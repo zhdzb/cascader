@@ -1,0 +1,145 @@
+const puInteractionType1 = async (sdkStore: Proto2SdkStoreMigrateOnly, migrateRemapKit: MigrateRemapKit, mainPageList = sdkStore.getSubHotItemList('B@main')!) => {
+  // interaction type1 有可能是 logic 值，需要替换成具体 cavnas key，跳转页面的的 target 会跨页面，所以只能后置处理
+  // resovle interaction type1
+  // only main
+  let currentCanvasKey = '';
+  const seenKeySet: Set<string> = new Set();
+  const recUpdateInteraction = (key: string) => {
+    if (seenKeySet.has(key)) return;
+    seenKeySet.add(key);
+    const item = sdkStore.getHotItem(key);
+
+    console.log(JSON.stringify(item?.hotAttr.interactions[0]));
+    
+    if (item?.hotAttr.type !== 'rResBunch') {
+      const intAct = [];
+      let shouldUpdate = false;
+      for (const ita of (item?.hotAttr as any).interactions as Interaction[]) {
+        // 切换页面状态
+        if (ita.interactionType === 1) {
+          // console.log('logic -----', ita.targetResCanvasKey)
+          // if (!getIsLogicJump(ita.targetResCanvasKey)) continue
+          let realTPKey = ita.targetRBPageKey;
+          if (migrateRemapKit.map.get(realTPKey)) {
+            realTPKey = migrateRemapKit.remapRefKeyM(realTPKey);
+          }
+          const targetPage = sdkStore.getHotItem(realTPKey);
+          if (targetPage === undefined) {
+            intAct.push(ita);
+            continue;
+          }
+          const targetPageSub = targetPage.sub.filter(sub => sdkStore.getHotItem(sub)?.hotAttr.type === 'rResCanvas');
+          let realTCKey = ita.targetResCanvasKey;
+          if (getIsLogicJump(realTCKey)) {
+            realTCKey = getRealTargetCanvasKeyV3(currentCanvasKey, ita.targetResCanvasKey, targetPageSub);
+          } else if (!targetPageSub.includes(realTCKey)) {
+            realTCKey = migrateRemapKit.remapRefKeyM(realTCKey);
+          }
+          const newType1Ita = {
+            ...ita,
+            targetRBPageKey: realTPKey,
+            targetResCanvasKey: realTCKey
+          };
+          intAct.push(newType1Ita);
+          shouldUpdate = true;
+          // const widgetInteractions = (sdkStore.getHotItem(key)?.hotAttr as APBase).interactions.filter(i => i.key !== ita.key)
+          // if(item.hotAttr.type === 'wBasket')
+          // sdkStore.updateHotAttrKV(key, 'interactions', [...widgetInteractions, newType1Ita])
+        } else if (ita.interactionType === 3) {
+          let realTCKey = ita.targetResCanvasKey;
+          if (!getIsLogicJump(realTCKey)) {
+            const targetBasketKey = ita.targetBasketKey;
+            if (targetBasketKey === 'CURRENT_BASKET_REF') {
+              // 母版
+              const keys = Array.from(migrateRemapKit.map.keys());
+              const key = keys.find(i => {
+                const arr = i.split('_');
+                if (arr.length === 2) {
+                  return realTCKey === arr[1];
+                }
+                return false;
+              });
+              if (key) {
+                realTCKey = migrateRemapKit.remapRefKeyM(key);
+              }
+            } else {
+              realTCKey = migrateRemapKit.remapCanvasRefKeyM(targetBasketKey, realTCKey);
+            }
+          }
+          const newType1Ita = {
+            ...ita,
+            targetResCanvasKey: realTCKey
+          };
+          intAct.push(newType1Ita);
+          shouldUpdate = true;
+          // const widgetInteractions = (sdkStore.getHotItem(key)?.hotAttr as APBase).interactions.filter(i => i.key !== ita.key)
+          // sdkStore.updateHotAttrKV(key, 'interactions', [...widgetInteractions, newType1Ita])
+        } else {
+          intAct.push(ita);
+        }
+      }
+      if (shouldUpdate) intActMap[key] = intAct;
+    }
+    if (item?.hotAttr.type === 'wBasket') {
+      // TODO: bl: 目前 muban 没有 post update 的需求
+      // if (item.hotAttr.basket === 'bDanli') {
+      const refRBPage = sdkStore.getHotItem(item.hotAttr.refRBPageKey);
+      updateDefaultCanvasKey(item.hotAttr.refRBPageKey);
+      for (const rbPageSubKey of refRBPage!.sub) {
+        console.log('wbasket-------');
+        
+        recUpdateInteraction(rbPageSubKey);
+      }
+      // }
+    } else {
+      console.log('else-----------------');
+      
+      for (const subKey of item!.sub) {
+        recUpdateInteraction(subKey);
+      }
+    }
+  };
+  const updateDefaultCanvasKey = (key: string) => {
+    const pageHotItem = sdkStore.getHotItem(key);
+    const defaultCanvasKey = migrateRemapKit.remapRefKeyM((pageHotItem?.hotAttr as ResBunchPageAttr).defaultCanvasKey);
+    if (defaultCanvasKey) {
+      defCvsMap[key] = defaultCanvasKey;
+      // sdkStore.updateHotAttrKV(key, 'defaultCanvasKey', defaultCanvasKey)
+    }
+  };
+  const updatePageList = async (pageList: Proto2HotItem[]) => {
+    for (const page of pageList) {
+      updateDefaultCanvasKey(page.key);
+      for (const subKey of page.sub) {
+        const hi = sdkStore.getHotItem(subKey);
+        if (hi?.hotAttr.type === 'rResBunch') {
+          updateDefaultCanvasKey(subKey);
+          await updatePageList([hi]);
+        } else {
+          if (hi?.hotAttr.type === 'rResCanvas') {
+            currentCanvasKey = hi.key;
+          }
+          console.log('updatepagelist-------------');
+          
+          await setTimeoutAsync(0); // TODO: NOTE: pause & wait other JS task to run
+          recUpdateInteraction(subKey);
+        }
+      }
+    }
+  };
+
+  // const mainPageList = sdkStore.getSubHotItemList('B@main')!
+  const defCvsMap: Record<string, string> = {};
+  const intActMap: Record<string, Interaction[]> = {};
+  await updatePageList(mainPageList);
+  sdkStore.updateHotAttrMergeBatch([...Object.entries(defCvsMap).map(([key, defaultCanvasKey]) => [key, {
+    defaultCanvasKey
+  }] as [key: string, hotAttrMerge: vObj]), ...Object.entries(intActMap).map(([key, interactions]) => [key, {
+    interactions
+  }] as [key: string, hotAttrMerge: vObj])]);
+  // 不能用下面去遍历，会丢失所在 cavnas 信息, 555
+  // const refDanliPageList = sdkStore.getSubHotItemList('B@ref-danli')
+  // updatePageList(refDanliPageList)
+  // const refMubanPageList = sdkStore.getSubHotItemList('B@ref-muban')
+  // updatePageList(refMubanPageList)
+};

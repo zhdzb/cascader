@@ -303,6 +303,8 @@ const Cascader = React.forwardRef<CascaderRef, InternalCascaderProps>((props, re
       showCheckedStrategy,
     );
 
+    console.log('path', deduplicateKeys);
+    
     return [...missingCheckedValues, ...getValueByKeyPath(deduplicateKeys)];
   }, [
     checkedValues,
@@ -311,7 +313,7 @@ const Cascader = React.forwardRef<CascaderRef, InternalCascaderProps>((props, re
     missingCheckedValues,
     showCheckedStrategy,
   ]);
-
+  console.log(missingCheckedValues, toPathKeys(checkedValues), deDuplicatedValues);
   const displayValues = useDisplayValues(
     deDuplicatedValues,
     mergedOptions,
@@ -319,6 +321,8 @@ const Cascader = React.forwardRef<CascaderRef, InternalCascaderProps>((props, re
     multiple,
     displayRender,
   );
+  console.log(deDuplicatedValues, displayValues);
+  
 
   // =========================== Change ===========================
   const triggerChange = useEvent((nextValues: InternalValueType) => {

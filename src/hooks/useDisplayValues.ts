@@ -16,6 +16,7 @@ export default (
   displayRender: CascaderProps['displayRender'],
 ) => {
   return React.useMemo(() => {
+    // debugger
     const mergedDisplayRender =
       displayRender ||
       // Default displayRender
